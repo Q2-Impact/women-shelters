@@ -1,0 +1,740 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="initial-scale=1,user-scalable=no,maximum-scale=1,width=device-width">
+        <meta name="mobile-web-app-capable" content="yes">
+        <meta name="apple-mobile-web-app-capable" content="yes">
+        <link rel="stylesheet" href="css/leaflet.css">
+        <link rel="stylesheet" href="css/L.Control.Layers.Tree.css">
+        <link rel="stylesheet" href="css/L.Control.Locate.min.css">
+        <link rel="stylesheet" href="css/qgis2web.css">
+        <link rel="stylesheet" href="css/fontawesome-all.min.css">
+        <link rel="stylesheet" href="css/filter.css">
+<link rel="stylesheet" href="css/nouislider.min.css">
+        <link rel="stylesheet" href="css/leaflet-control-geocoder.Geocoder.css">
+        <style>
+        html, body, #map {
+            width: 100%;
+            height: 100%;
+            padding: 0;
+            margin: 0;
+        }
+        </style>
+        <title></title>
+    </head>
+    <body>
+        <div id="map">
+        </div>
+        <script src="js/qgis2web_expressions.js"></script>
+        <script src="js/leaflet.js"></script>
+        <script src="js/L.Control.Layers.Tree.min.js"></script>
+        <script src="js/L.Control.Locate.min.js"></script>
+        <script src="js/leaflet.rotatedMarker.js"></script>
+        <script src="js/leaflet.pattern.js"></script>
+        <script src="js/leaflet-hash.js"></script>
+        <script src="js/Autolinker.min.js"></script>
+        <script src="js/rbush.min.js"></script>
+        <script src="js/labelgun.min.js"></script>
+        <script src="js/labels.js"></script>
+        <script src="js/leaflet-control-geocoder.Geocoder.js"></script>
+        <script>
+    // Define the style for the icon based on whether the shelter is open or closed
+    function getIconForOpenState(openState) {
+        var iconColor;
+        if (openState === 'Open') {
+            iconColor = '#00FF7F';
+        } else if (openState === 'Closed') {
+            iconColor = 'red';
+        } else {
+            iconColor = '#1E90FF'
+        }
+
+        return L.divIcon({
+            className: 'custom-icon', 
+            html: '<div style="background-color: ' + iconColor + '; width: 10px; height: 10px; border-radius: 50%;"></div>',
+            iconSize: [10, 10],
+            iconAnchor: [5, 10],
+            popupAnchor: [0, -10]
+        });
+    }
+</script>
+        <script src="js/tailDT.js"></script>
+<script src="js/nouislider.min.js"></script>
+<script src="js/wNumb.js"></script>
+        <script src="data/full_shelter_data_v6_1.js"></script>
+        <script>
+        
+        var mapDiv = document.getElementById('map');
+        const row = document.createElement('div');
+        // var row = document.createElement('div');
+        row.className = "row";
+        row.id = "all";
+        row.style.height = "100%";
+        const col1 = document.createElement('div');
+        //var col1 = document.createElement('div');
+        col1.className = "col9";
+        col1.id = "mapWindow";
+        col1.style.height = "99%";
+        col1.style.width = "100%";
+        col1.style.display = "inline-block";
+        const col2 = document.createElement('div');
+        //var col2 = document.createElement('div');
+        col2.className = "col3";
+        col2.id = "menu";
+        col2.style.display = "inline-block";
+        col2.style.verticalAlign = "top";
+        // col2.style.padding = "10px";
+        // col2.style.overflowY = "auto";
+        // col2.style.height = "100%";
+
+        //inserts the row layout
+        mapDiv.parentNode.insertBefore(row, mapDiv);
+        document.getElementById("all").appendChild(col1);
+        document.getElementById("all").appendChild(col2);
+        col1.appendChild(mapDiv);
+
+
+        var highlightLayer;
+        function highlightFeature(e) {
+            highlightLayer = e.target;
+
+            if (e.target.feature.geometry.type === 'LineString' || e.target.feature.geometry.type === 'MultiLineString') {
+              highlightLayer.setStyle({
+                color: '#39FF14',
+              });
+            } else {
+              highlightLayer.setStyle({
+                fillColor: '#ffff00',
+                fillOpacity: 1
+              });
+            }
+            highlightLayer.openPopup();
+        }
+
+        var map = L.map('map', {
+            zoomControl:false, maxZoom:28, minZoom:1
+        }).setView([39.8283, -98.5795], 4);
+        var hash = new L.Hash(map);
+        map.attributionControl.setPrefix('<a href="https://github.com/tomchadwin/qgis2web" target="_blank">qgis2web</a> &middot; <a href="https://leafletjs.com" title="A JS library for interactive maps">Leaflet</a> &middot; <a href="https://qgis.org">QGIS</a>');
+        var autolinker = new Autolinker({truncate: {length: 30, location: 'smart'}});
+        // remove popup's row if "visible-with-data"
+        function removeEmptyRowsFromPopupContent(content, feature) {
+         var tempDiv = document.createElement('div');
+         tempDiv.innerHTML = content;
+         var rows = tempDiv.querySelectorAll('tr');
+         for (var i = 0; i < rows.length; i++) {
+             var td = rows[i].querySelector('td.visible-with-data');
+             var key = td ? td.id : '';
+             if (td && td.classList.contains('visible-with-data') && feature.properties[key] == null) {
+                 rows[i].parentNode.removeChild(rows[i]);
+             }
+         }
+         return tempDiv.innerHTML;
+        }
+        // add class to format popup if it contains media
+		function addClassToPopupIfMedia(content, popup) {
+			var tempDiv = document.createElement('div');
+			tempDiv.innerHTML = content;
+			if (tempDiv.querySelector('td img')) {
+				popup._contentNode.classList.add('media');
+					// Delay to force the redraw
+					setTimeout(function() {
+						popup.update();
+					}, 10);
+			} else {
+				popup._contentNode.classList.remove('media');
+			}
+		}
+
+        // Add search capabilities
+        // Create search input and result list
+        var searchContainer = document.createElement('div');
+        searchContainer.style.marginTop = "10px";
+
+        // Create search toggle control on the map
+        var customSearchControl = L.control({ position: 'topleft' });
+
+        customSearchControl.onAdd = function () {
+            var container = L.DomUtil.create('div', 'leaflet-bar leaflet-control leaflet-control-custom');
+            container.style.backgroundColor = 'white';
+            container.style.padding = '9px';
+
+            // Search icon (toggle button)
+            var icon = document.createElement('i');
+            icon.className = 'fa fa-search';
+            icon.style.cursor = 'pointer';
+            icon.title = 'Search';
+            container.appendChild(icon);
+
+            // Search wrapper (initially hidden)
+            var searchWrapper = document.createElement('div');
+            searchWrapper.id = 'custom-search-wrapper';
+            searchWrapper.style.display = 'none';
+            searchWrapper.style.marginTop = '10px';
+            searchWrapper.style.width = '400px';
+
+            searchWrapper.innerHTML = `
+                <input type="text" id="unified-search" placeholder="Search by shelter name, type, or location (city, state or zip code)" style="width: 95%; padding: 6px;" autocomplete="off" />
+                <ul id="search-results" style="list-style: none; padding-left: 0; margin-top: 5px; max-height: 150px; overflow-y: auto; background: white; border: 1px solid #ccc; display: none;"></ul>
+            `;
+
+            container.appendChild(searchWrapper);
+
+            icon.onclick = function () {
+                searchWrapper.style.display = searchWrapper.style.display === 'none' ? 'block' : 'none';
+            };
+
+            // Prevent map dragging when interacting with input
+            L.DomEvent.disableClickPropagation(container);
+
+            return container;
+        };
+        customSearchControl.addTo(map);
+
+
+        const unifiedInput = document.getElementById('unified-search');
+        const resultsList = document.getElementById('search-results');
+        L.DomEvent.disableScrollPropagation(resultsList);
+
+
+        // Declare a variable to store the reference location (either user's location or map center)
+        let referenceLocation = null;
+
+        // Function to get reference location (user's location or map center)
+        function getReferenceLocation() {
+            return new Promise(function(resolve, reject) {
+                if (navigator.geolocation) {
+                    // Try to get the user's current location
+                    navigator.geolocation.getCurrentPosition(function(position) {
+                        const userLocation = L.latLng(position.coords.latitude, position.coords.longitude);
+                        referenceLocation = userLocation;
+                        resolve(userLocation);
+                    }, function(error) {
+                        // If unable to get location, fallback to the map center
+                        console.warn("Geolocation failed, using map center.");
+                        const mapCenter = map.getCenter();
+                        referenceLocation = mapCenter;
+                        resolve(mapCenter);
+                    });
+                } else {
+                    // Fallback to map center if geolocation is not supported
+                    console.warn("Geolocation not supported, using map center.");
+                    const mapCenter = map.getCenter();
+                    referenceLocation = mapCenter;
+                    resolve(mapCenter);
+                }
+            });
+        }
+
+        // Get reference location once when the page loads
+        getReferenceLocation().then(function(referenceLocation) {
+            console.log("Reference location obtained:", referenceLocation);
+        }).catch(function(error) {
+            console.error("Error getting reference location:", error);
+        });
+
+        // Update reference location whenever the map moves
+        map.on('moveend', function() {
+            referenceLocation = map.getCenter(); // Update reference location with the new center
+            console.log("Map moved, new reference location:", referenceLocation);
+        });
+
+        unifiedInput.addEventListener('input', function () {
+            const searchTerm = unifiedInput.value.trim().toLowerCase();
+            resultsList.innerHTML = '';
+
+            if (searchTerm.length === 0) {
+                resultsList.style.display = 'none';
+                return;
+            }
+
+            // Check if we have a reference location (it will be set after page load or after the map move)
+            if (!referenceLocation) {
+                console.warn("Reference location not set yet. Using map center as fallback.");
+                referenceLocation = map.getCenter(); // Use map center as fallback
+            }
+
+            // Filter shelters based on the search term
+            const matches = json_full_shelter_data_v6_1.features.filter(feature => {
+                const name = feature.properties['Name']?.toLowerCase() || '';
+                const type = feature.properties['Type']?.toLowerCase() || '';
+                return name.includes(searchTerm) || type.includes(searchTerm);
+            });
+
+            // Sort shelters by their distance to the reference location
+            matches.sort((a, b) => {
+                const coordsA = L.latLng(a.geometry.coordinates[1], a.geometry.coordinates[0]);
+                const coordsB = L.latLng(b.geometry.coordinates[1], b.geometry.coordinates[0]);
+
+                const distanceA = referenceLocation.distanceTo(coordsA); // distance in meters
+                const distanceB = referenceLocation.distanceTo(coordsB);
+
+                return distanceA - distanceB; // Ascending order by distance
+            });
+
+            if (matches.length > 0) {
+                resultsList.style.display = 'block';
+
+                // Ensure scrolling styles are applied
+                resultsList.style.maxHeight = '200px';
+                resultsList.style.overflowY = 'auto';
+                resultsList.style.overflowX = 'hidden';
+                resultsList.style.pointerEvents = 'auto';
+
+                matches.slice(0, 10).forEach(feature => {
+                    const item = document.createElement('li');
+                    item.textContent = `${feature.properties['Name']} (${feature.properties['Type']})`;
+                    item.style.padding = '6px';
+                    item.style.cursor = 'pointer';
+                    item.style.borderBottom = '1px solid #eee';
+                    item.addEventListener('click', function () {
+                        const coords = feature.geometry.coordinates;
+                        const latlng = L.latLng(coords[1], coords[0]);
+                        map.setView(latlng, 13);
+                        unifiedInput.value = '';
+                        resultsList.innerHTML = '';
+                        resultsList.style.display = 'none';
+
+                        layer_full_shelter_data_v6_1.eachLayer(function (layer) {
+                            if (layer.feature && layer.feature.properties['Name'] === feature.properties['Name']) {
+                                layer.openPopup();
+                            }
+                        });
+                    });
+                    resultsList.appendChild(item);
+                });
+                } else {
+                // No matches, attempt location geocode
+                resultsList.style.display = 'none';
+
+                unifiedInput.onkeydown = function (e) {
+                    if (e.key === 'Enter') {
+                        geocoder.geocode(searchTerm, function(results) {
+                            if (results && results.length > 0) {
+                                const r = results[0];
+                                const latlng = L.latLng(
+                                    r.center ? r.center.lat : r.lat,
+                                    r.center ? r.center.lng : r.lon
+                                );
+                                map.setView(latlng, 12);
+                            }
+                        });
+                    }
+                };
+            }
+        });
+
+        // Close dropdown on outside click
+        document.addEventListener('click', function (e) {
+            const searchWrapper = document.getElementById('custom-search-wrapper');
+            const icon = document.querySelector('.fa-search');
+            // Check if the clicked element is outside the search container and the icon
+            if (!searchWrapper.contains(e.target) && e.target !== icon) {
+                searchWrapper.style.display = 'none';
+            }
+        });
+
+
+        //map.addControl(new customSearchControl());
+        L.control.locate({locateOptions: {maxZoom: 19}}).addTo(map);
+
+        var zoomControl = L.control.zoom({
+            position: 'topleft'
+        }).addTo(map);
+        
+        var bounds_group = new L.featureGroup([]);
+        function setBounds() {
+        }
+        map.createPane('pane_GoogleSatelliteHybrid_0');
+        map.getPane('pane_GoogleSatelliteHybrid_0').style.zIndex = 400;
+        var layer_GoogleSatelliteHybrid_0 = L.tileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
+            pane: 'pane_GoogleSatelliteHybrid_0',
+            opacity: 1.0,
+            attribution: '',
+            minZoom: 1,
+            maxZoom: 28,
+        });
+        layer_GoogleSatelliteHybrid_0;
+        map.addLayer(layer_GoogleSatelliteHybrid_0);
+        function formatHours(hoursString) {
+            if (!hoursString) return '';
+
+            const daysOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+            const dayHours = {};
+
+            // Split by semicolon, trim, and map to object
+            hoursString.split(';').forEach(entry => {
+                const [day, time] = entry.split(': ');
+                if (day && time) {
+                    dayHours[day.trim()] = time.trim();
+                }
+            });
+
+            // Rebuild in desired order
+            return daysOrder.map(day => {
+                if (dayHours[day]) {
+                    return `${day}: ${dayHours[day]}`;
+                }
+                return '';
+            }).filter(Boolean).join('<br>');
+        }
+        function pop_full_shelter_data_v6_1(feature, layer) {
+          setOpenState(feature);
+            var popupPinned = false;
+            // Event listener for mouseover (hover over the feature)
+            layer.on('mouseover', function(e) {
+                if(!popupPinned) {
+                    layer.openPopup();
+                }
+            });
+
+           // Event listener for mouseout (when mouse leaves the feature)
+            layer.on('mouseout', function(e) {
+               if (!popupPinned) {
+                   layer.closePopup();
+               }
+            });
+
+            // Event listener for click (toggle popup open/close)
+            layer.on('click', function(e) {
+                if (!popupPinned) {
+                    layer.openPopup(); // open the popup if its open
+                    popupPinned = true; // pins the popup so it can be reopened
+                } else {
+                    layer.closePopup(); // close the popup if not open
+                    popupPineed = false; // unpins the popup so it doesn't auto-close on mouseout
+                }
+            });
+
+
+            // Close popup when clicking elsewhere on the map
+            map.on('click', function(e) {
+                if (popupPinned) {
+                    popupPinned = false; //unpins the popup when clicking elsewhere
+                    layer.closePopup();
+                }
+            });
+            var popupContent = '<table>\
+              <tr>\
+                        <th scope="row">Name</th>\
+                        <td colspan="2">' + (feature.properties['Name'] !== null ? autolinker.link(String(feature.properties['Name']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <th scope="row">Open State</th>\
+                        <td colspan="2">' + (feature.properties['OpenState'] !== null ? feature.properties['OpenState'] : 'Unknown') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <th scope="row">Hours</th>\
+                        <td colspan="2">' + formatHours(feature.properties['Hours']) + '</td>\
+                    </tr>\
+                    <tr>\
+                        <th scope="row">Address</th>\
+                        <td colspan="2">' + (feature.properties['Address'] !== null ? autolinker.link(String(feature.properties['Address']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <th scope="row">Phone</th>\
+                        <td colspan="2">' + (feature.properties['Phone'] !== null ? autolinker.link(String(feature.properties['Phone']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <th scope="row">Website</th>\
+                        <td colspan="2">' + (feature.properties['Website'] !== null ? autolinker.link(String(feature.properties['Website']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <th scope="row">Email</th>\
+                        <td colspan="2">' + (feature.properties['Email'] !== null ? autolinker.link(String(feature.properties['Email']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <th scope="row">Shelter Type</th>\
+                        <td colspan="2">' + (feature.properties['Type'] !== null ? autolinker.link(String(feature.properties['Type']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                </table>';
+            var content = removeEmptyRowsFromPopupContent(popupContent, feature);
+			layer.on('popupopen', function(e) {
+				addClassToPopupIfMedia(content, e.popup);
+			});
+			layer.bindPopup(content, { maxHeight: 400, autoClose: false, closeOnClick: true });
+        }
+
+        function style_full_shelter_data_v6_1_0() {
+            return {
+                pane: 'pane_full_shelter_data_v6_1',
+                radius: 8.0,
+                opacity: 1,
+                color: 'rgba(128,17,25,1.0)',
+                dashArray: '',
+                lineCap: 'butt',
+                lineJoin: 'miter',
+                weight: 2.0,
+                fill: true,
+                fillOpacity: 1,
+                fillColor: 'rgba(219,30,42,1.0)',
+                interactive: true,
+            }
+        }
+        map.createPane('pane_full_shelter_data_v6_1');
+        map.getPane('pane_full_shelter_data_v6_1').style.zIndex = 401;
+        map.getPane('pane_full_shelter_data_v6_1').style['mix-blend-mode'] = 'normal';
+        var layer_full_shelter_data_v6_1 = new L.geoJson(json_full_shelter_data_v6_1, {
+            attribution: '',
+            interactive: true,
+            dataVar: 'json_full_shelter_data_v6_1',
+            layerName: 'layer_full_shelter_data_v6_1',
+            pane: 'pane_full_shelter_data_v6_1',
+            onEachFeature: pop_full_shelter_data_v6_1,
+            pointToLayer: function (feature, latlng) {
+                setOpenState(feature);
+                var openState = feature.properties['OpenState']; 
+                var icon = getIconForOpenState(openState); // Get the correct icon based on OpenState
+    
+                return L.marker(latlng, {
+                    icon: icon // Set the marker's icon to the one determined by OpenState
+                });
+            }
+        });
+        bounds_group.addLayer(layer_full_shelter_data_v6_1);
+        map.addLayer(layer_full_shelter_data_v6_1);
+        var geocoder = L.Control.Geocoder.nominatim();
+        // var osmGeocoder = new L.Control.Geocoder({
+        //     collapsed: true,
+        //     position: 'topleft',
+        //     text: 'Search',
+        //     title: 'Testing'
+        // }).addTo(map);
+        // // Hiding the search button via CSS (this could be done inline in your styles)
+        // document.getElementsByClassName('leaflet-control-geocoder-icon')[0].style.display = 'none';       
+        // document.getElementsByClassName('leaflet-control-geocoder-icon')[0]
+        // .className += ' fa fa-search';
+        // document.getElementsByClassName('leaflet-control-geocoder-icon')[0]
+        // .title += 'Search for a place';
+        var overlaysTree = [
+            {label: '<img src="legend/full_shelter_data_v6_1.png" /> full_shelter_data_v6', layer: layer_full_shelter_data_v6_1},
+            {label: "Google Satellite Hybrid", layer: layer_GoogleSatelliteHybrid_0},]
+        var lay = L.control.layers.tree(null, overlaysTree,{
+            //namedToggle: true,
+            //selectorBack: false,
+            //closedSymbol: '&#8862; &#x1f5c0;',
+            //openedSymbol: '&#8863; &#x1f5c1;',
+            //collapseAll: 'Collapse all',
+            //expandAll: 'Expand all',
+            collapsed: true,
+        });
+        setBounds();
+
+        var legend = L.control({ position: 'topright' });
+
+        legend.onAdd = function (map) {
+            var div = L.DomUtil.create('div', 'leaflet-legend');  // Create the container for the legend
+            
+            // Style the legend container with a white background and black border
+            div.style.backgroundColor = "white";
+            div.style.border = "1px solid black";
+            div.style.padding = "1px";
+            div.style.borderRadius = "5px";
+            div.style.fontSize = "14px";
+
+            // Add a title for the legend
+            var legendTitle = document.createElement('h4');
+            legendTitle.innerText = 'Open State';
+            legendTitle.style.marginTop = "2px";  // Add top margin to reduce space between title and top
+            legendTitle.style.marginBottom = "2px";
+
+            div.appendChild(legendTitle);
+
+            // Define legend items (state and associated color)
+            var legendItems = [
+                { state: 'Open', color: '#39FF14' },
+                { state: 'Closed', color: 'red' },
+                { state: 'Unknown', color: '#1E90FF' }
+            ];
+
+            // Add a circle with color and label for each state
+            legendItems.forEach(function (item) {
+                div.innerHTML += 
+                    '<div style="display: flex; align-items: center; margin-bottom: 5px;">' +
+                        '<i style="background: ' + item.color + '; border-radius: 50%; width: 10px; height: 10px; margin-right: 5px;"></i>' + 
+                        item.state +
+                    '</div>';
+            });
+
+            return div;
+        };
+
+        // Add the legend to the map
+        legend.addTo(map);
+
+        // // ℹ️ Info Button to toggle About box
+        // var aboutBtn = L.control({ position: 'topleft' });
+
+        // aboutBtn.onAdd = function () {
+        //     var div = L.DomUtil.create('div', 'leaflet-bar leaflet-control leaflet-control-custom');
+        //     div.innerHTML = '<i class="fa fa-info-circle" style="padding: 8px; font-size: 14px;" title="About"></i>';
+        //     div.style.backgroundColor = 'white';
+        //     div.style.cursor = 'pointer';
+
+        //     div.onclick = function () {
+        //         var box = document.getElementById('about-box');
+        //         box.style.display = box.style.display === 'none' ? 'block' : 'none';
+        //     };
+
+        //     return div;
+        // };
+
+        // aboutBtn.addTo(map);
+
+    
+    
+
+        function filterFunc() {
+            map.eachLayer(function (lyr) {
+                if ("options" in lyr && "dataVar" in lyr["options"]) {
+                    // Get the features from the GeoJSON data
+                    var features = this[lyr.options.dataVar].features.slice(0);
+
+                    // Get the selected states from the checked checkboxes
+                    var selectedStates = Array.from(document.querySelectorAll('input[type="checkbox"]:checked'))
+                        .map(checkbox => checkbox.getAttribute('data-state'));
+
+                    // If no checkboxes are selected, show all features
+                    if (selectedStates.length > 0) {
+                        // Filter the features based on selected states
+                        features = features.filter(f => selectedStates.includes(f.properties['OpenState']));
+                    }
+
+                    // If no filter is applied (all checkboxes are unchecked), all points will be shown
+                    if (selectedStates.length === 0) {
+                        features = this[lyr.options.dataVar].features.slice(0);  // Restore all features
+                    }
+
+                    // Clear the current layer and add the filtered (or all) features
+                    this[lyr.options.layerName].clearLayers();
+                    this[lyr.options.layerName].addData(features);
+                }
+            });
+        }
+
+        var FilterControl = L.Control.extend({
+            onAdd: function(map) {
+                const wrapper = L.DomUtil.create('div', 'leaflet-bar leaflet-control leaflet-control-custom');
+                wrapper.style.backgroundColor = 'white';
+                wrapper.style.padding = '8px';
+                
+
+                // Filter icon (toggle button)
+                const icon = document.createElement('i');
+                icon.className = 'fa fa-filter';
+                icon.style.cursor = 'pointer';
+                icon.title = 'Filter Shelters';
+                icon.style.fontSize = '12px';
+                icon.style.padding = '1px'; 
+                wrapper.appendChild(icon);
+
+                // Filter wrapper (initially hidden)
+                const filterWrapper = document.createElement('div');
+                filterWrapper.id = 'custom-filter-wrapper';
+                filterWrapper.style.display = 'none'; // Hidden by default
+                filterWrapper.style.marginTop = '10px';
+                filterWrapper.style.width = '100px';
+                filterWrapper.style.right = '100%';
+                // filterWrapper.style.position = 'absolute'
+
+                // Filter options (checkboxes)
+                filterWrapper.innerHTML = `
+                    <ul style="list-style: none; padding-left: 0; margin-top: 5px; background: white; border: 1px solid #ccc; display: block;">
+                        <li><input type="checkbox" id="filter-open" class="filter-checkbox" data-state="Open" /> Open</li>
+                        <li><input type="checkbox" id="filter-closed" class="filter-checkbox" data-state="Closed" /> Closed</li>
+                        <li><input type="checkbox" id="filter-unknown" class="filter-checkbox" data-state="Unknown" /> Unknown</li>
+                    </ul>
+                    <button id="select-all-filters" style="width: 100%; margin-top: 10px;">Select All</button>
+                `;
+
+                wrapper.appendChild(filterWrapper);
+
+                // Toggle filter wrapper visibility when the filter icon is clicked
+                icon.onclick = function () {
+                    filterWrapper.style.display = filterWrapper.style.display === 'none' ? 'block' : 'none';
+                };
+
+                // Select All Filters Button
+                const selectAllFiltersBtn = filterWrapper.querySelector('#select-all-filters');
+                selectAllFiltersBtn.onclick = function () {
+                    // Select all checkboxes (Open, Closed, Unknown)
+                    filterWrapper.querySelectorAll('.filter-checkbox').forEach(checkbox => checkbox.checked = true);
+                    filterFunc(); // Call filter function to update the map
+                };
+
+                // Add event listeners to each checkbox to trigger filterFunc when checked or unchecked
+                const filterCheckboxes = filterWrapper.querySelectorAll('.filter-checkbox');
+                filterCheckboxes.forEach(checkbox => {
+                    checkbox.addEventListener('change', function() {
+                        filterFunc(); // Call filter function on checkbox change
+                    });
+                });
+
+                // Prevent map dragging when interacting with the filter wrapper
+                L.DomEvent.disableClickPropagation(filterWrapper);
+
+                // Close the filter wrapper when clicking outside
+                document.addEventListener('click', function (e) {
+                    if (!wrapper.contains(e.target)) {
+                        filterWrapper.style.display = 'none';
+                    }
+                });
+
+                return wrapper;
+            }
+        });
+
+        map.addControl(new FilterControl({ position: 'topleft' }));
+
+        // ℹ️ Info Button to toggle About box
+        var aboutBtn = L.control({ position: 'topleft' });
+
+        aboutBtn.onAdd = function () {
+            var div = L.DomUtil.create('div', 'leaflet-bar leaflet-control leaflet-control-custom');
+            div.innerHTML = '<i class="fa fa-info-circle" style="padding: 8px; font-size: 14px;" title="About"></i>';
+            div.style.backgroundColor = 'white';
+            div.style.cursor = 'pointer';
+
+            div.onclick = function () {
+                var box = document.getElementById('about-box');
+                box.style.display = box.style.display === 'none' ? 'block' : 'none';
+            };
+
+            return div;
+        };
+
+        aboutBtn.addTo(map);
+
+
+
+        </script>
+        <!-- About Info Box (Hidden Initially) -->
+        <div id="about-box" style="
+            position: absolute;
+            top: 100px;
+            left: 50px;
+            z-index: 1000;
+            background: white;
+            border: 1px solid #ccc;
+            padding: 15px;
+            border-radius: 6px;
+            max-width: 300px;
+            box-shadow: 0px 0px 8px rgba(0,0,0,0.2);
+            font-family: sans-serif;
+            display: none;
+        ">
+        <b>🏠 Shelter Finder Web App</b><br><br>
+        The Shelter Finder Web App is an interactive web-based map built using QGIS and qgis2web, designed to help users locate nearby shelters across the United States with ease. This tool is especially useful for individuals in need, social workers, researchers, and emergency response teams.
+        
+        <br><br><b>🧠 How to Use:</b><br>
+        1. Zoom and pan across the map to explore shelter locations.<br>
+        2. Click on any shelter icon to view detailed information.<br>
+        3. Use the search box in the top left to find a specific shelter by name.<br>
+        4. You can find shelters by giving location.<br><br>
+        <br><br>
+        <button onclick="document.getElementById('about-box').style.display='none'">Close</button>
+        </div>
+    </body>
+</html>
