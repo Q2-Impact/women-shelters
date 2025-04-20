@@ -1,7 +1,3 @@
----
-title: "Women Shelter Map - Q2 Impact"
-output: github_document
----
 
 # Women Shelter Locator Web App
 
